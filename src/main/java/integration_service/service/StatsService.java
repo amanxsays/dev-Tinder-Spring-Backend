@@ -14,7 +14,7 @@ public class StatsService {
 
     public StatsService() {
         this.codeforcesClient = RestClient.builder().baseUrl("https://codeforces.com").build();
-        this.githubClient = RestClient.builder().baseUrl("https://api.github.com").build();
+        this.githubClient = RestClient.builder().baseUrl("https://api.github.com").defaultHeader("User-Agent", "DevTinder-App").build();
     }
 
     public GitHubStats getGitHubStats(String username) {
