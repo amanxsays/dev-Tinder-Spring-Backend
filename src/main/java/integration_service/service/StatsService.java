@@ -24,7 +24,7 @@ public class StatsService {
                     .retrieve()
                     .body(GitHubStats.class);
         } catch (Exception e) {
-            System.out.println("Failed to fetch GitHub data for: " + username);
+            System.out.println("Failed to fetch GitHub data for: " + username+ "Bcz of "+e.getMessage());
             return null;
         }
     }
