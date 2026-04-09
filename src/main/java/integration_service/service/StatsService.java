@@ -14,7 +14,15 @@ public class StatsService {
 
     public StatsService() {
         this.codeforcesClient = RestClient.builder().baseUrl("https://codeforces.com").build();
-        this.githubClient = RestClient.builder().baseUrl("https://api.github.com").defaultHeader("User-Agent", "DevTinder-App").build();
+        RestClient.Builder gitHubBuilder= RestClient.builder().baseUrl("https://api.github.com").defaultHeader("User-Agent", "DevTinder-App");
+        String githubToken = System.getenv("GITHUB_TOKEN");
+        if (githubToken != null && !githubToken.trim().isEmpty()) {
+            System.out.println("✅ GITHUB_TOKEN loaded successfully!");
+            gitHubBuilder.defaultHeader("Authorization", "Bearer " + githubToken);
+        } else {
+            System.out.println("⚠️ WARNING: No GITHUB_TOKEN found. Default rate limits apply.");
+        }
+        this.githubClient = gitHubBuilder.build();
     }
 
     public GitHubStats getGitHubStats(String username) {
