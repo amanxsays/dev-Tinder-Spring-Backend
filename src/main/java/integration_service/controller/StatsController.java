@@ -21,15 +21,16 @@ public class StatsController {
 
     @GetMapping
     public Map<String, Object> getAggregatedStats(@RequestParam(required = false) String github,
-                                                  @RequestParam(required = false) String codeforces) {
+                                                  @RequestParam(required = false) String codeforces,
+                                                  @RequestParam String userId) {
         Map<String, Object> response = new HashMap<>();
 
         if (github != null && !github.trim().isEmpty()) {
-            response.put("github", statsService.getGitHubStats(github));
+            response.put("github", statsService.getGitHubStats(github, userId));
         }
 
         if(codeforces != null && !codeforces.trim().isEmpty()) {
-            response.put("codeforces", statsService.getCodeforcesStats(codeforces));
+            response.put("codeforces", statsService.getCodeforcesStats(codeforces,userId));
         }
         return response;
     }
