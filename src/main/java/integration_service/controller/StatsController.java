@@ -25,6 +25,7 @@ public class StatsController {
     @GetMapping
     public Map<String, Object> getAggregatedStats(@RequestParam(required = false) String github,
                                                   @RequestParam(required = false) String codeforces,
+                                                  @RequestParam(required = false) String leetcode,
                                                   @RequestParam String userId) {
         Map<String, Object> response = new HashMap<>();
 
@@ -34,6 +35,10 @@ public class StatsController {
 
         if(codeforces != null && !codeforces.trim().isEmpty()) {
             response.put("codeforces", statsService.getCodeforcesStats(codeforces,userId));
+        }
+
+        if (leetcode != null && !leetcode.isEmpty()) {
+            response.put("leetcode", statsService.getLeetCodeStats(leetcode, userId));
         }
         return response;
     }
