@@ -1,6 +1,8 @@
 package integration_service.controller;
 
 import integration_service.service.StatsService;
+
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -11,6 +13,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/stats")
+@CrossOrigin(origins = {"http://localhost:5173", "https://devtinderfront.netlify.app"})
 public class StatsController {
 
     private final StatsService statsService;
