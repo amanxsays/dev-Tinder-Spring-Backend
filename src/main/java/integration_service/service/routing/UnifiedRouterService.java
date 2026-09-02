@@ -55,7 +55,7 @@ public class UnifiedRouterService {
             );
 
             Map<String, Object> response = restClient.post()
-                    .uri("/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey)
+                    .uri("/v1beta/models/gemini-3.6-flash:generateContent?key=" + apiKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(requestBody)
                     .retrieve()

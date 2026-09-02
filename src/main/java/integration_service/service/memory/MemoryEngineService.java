@@ -51,7 +51,7 @@ public class MemoryEngineService {
             );
 
             Map response = restClient.post()
-                    .uri("/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey)
+                    .uri("/v1beta/models/gemini-3.6-flash:generateContent?key=" + apiKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(requestBody)
                     .retrieve()

@@ -34,7 +34,7 @@ public class RedisWorkerService {
         workerPool.execute(() -> {
             while (true) {
                 try {
-                    String jobPayload = redisTemplate.opsForList().leftPop("ai-job-queue", Duration.ofSeconds(5));
+                    String jobPayload = redisTemplate.opsForList().leftPop("ai-job-queue", Duration.ofSeconds(60));
                     if (jobPayload != null) {
                         workerPool.submit(() -> processJob(jobPayload));
                     }

@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+
 @Document(collection = "ai_user_memories")
 public class UserMemory {
     @Id
