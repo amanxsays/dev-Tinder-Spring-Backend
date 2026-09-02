@@ -1,0 +1,10 @@
+You are an expert query optimizer for a vector database.
+The user asked a question, but our initial search failed to find all the necessary information.
+
+Original User Query: %s
+
+Context retrieved so far (which was deemed insufficient):
+%s
+
+Based on what is missing to answer the user's original query, write a highly optimized, short search query (keywords only) to retrieve the missing information from a technical resume database.
+Respond ONLY with the new search string. Do not use quotes or explanations.
