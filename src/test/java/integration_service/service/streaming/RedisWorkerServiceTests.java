@@ -2,7 +2,14 @@ package integration_service.service.streaming;
 
 import integration_service.service.memory.MemoryEngineService;
 import integration_service.service.routing.AgenticOrchestratorService;
+import integration_service.model.ChatAnswer;
+import integration_service.model.ResumeSource;
+import integration_service.service.retrieval.AnswerGenerationException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import java.util.concurrent.CompletionException;
 import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -10,11 +17,89 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
+import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RedisWorkerServiceTests {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @SuppressWarnings("unchecked")
+    void generationFailureSendsOnlyErrorAndSkipsMemoryCall(boolean asynchronous) throws Exception {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ListOperations<String, String> queue = mock(ListOperations.class);
+        when(redis.opsForList()).thenReturn(queue);
+        AtomicBoolean delivered = new AtomicBoolean();
+        when(queue.leftPop("ai-job-queue", Duration.ofSeconds(60))).thenAnswer(invocation -> {
+            if (!delivered.getAndSet(true)) return "job||user||Fixture query";
+            try { new CountDownLatch(1).await(); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            return null;
+        });
+        AgenticOrchestratorService orchestrator = mock(AgenticOrchestratorService.class);
+        var failure = new AnswerGenerationException("Daily limit reached", new RuntimeException("provider detail"));
+        when(orchestrator.processUserQuery("Fixture query", "user"))
+                .thenThrow(asynchronous ? new CompletionException(failure) : failure);
+        MemoryEngineService memory = mock(MemoryEngineService.class);
+        CountDownLatch errorSent = new CountDownLatch(1);
+        when(redis.convertAndSend(eq("ai-chat-updates"), anyString())).thenAnswer(invocation -> {
+            if (((String) invocation.getArgument(1)).startsWith("job||error||")) errorSent.countDown();
+            return 1L;
+        });
+        var worker = new RedisWorkerService(redis, orchestrator, memory);
+        try { worker.start(); assertTrue(errorSent.await(5, TimeUnit.SECONDS)); }
+        finally { worker.stop(); }
+        verify(redis).convertAndSend("ai-chat-updates", "job||error||Daily limit reached");
+        verify(redis, never()).convertAndSend(eq("ai-chat-updates"), startsWith("job||message||"));
+        verifyNoInteractions(memory);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sendsResumeSourcesTogetherWithTheTerminalAnswerEvent() throws Exception {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ListOperations<String, String> queue = mock(ListOperations.class);
+        when(redis.opsForList()).thenReturn(queue);
+        AtomicBoolean delivered = new AtomicBoolean();
+        when(queue.leftPop("ai-job-queue", Duration.ofSeconds(60))).thenAnswer(invocation -> {
+            if (!delivered.getAndSet(true)) return "job||user||Find developers";
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        });
+        CountDownLatch answerSent = new CountDownLatch(1);
+        when(redis.convertAndSend(eq("ai-chat-updates"), anyString())).thenAnswer(invocation -> {
+            if (((String) invocation.getArgument(1)).startsWith("job||message||")) answerSent.countDown();
+            return 1L;
+        });
+        AgenticOrchestratorService orchestrator = mock(AgenticOrchestratorService.class);
+        when(orchestrator.processUserQuery("Find developers", "user"))
+                .thenReturn(new ChatAnswer("See [Resume.pdf](resume:doc)",
+                        List.of(new ResumeSource("doc", "candidate", "Resume.pdf", "https://example.test/resume.pdf"))));
+        RedisWorkerService worker = new RedisWorkerService(redis, orchestrator, mock(MemoryEngineService.class));
+        try {
+            worker.start();
+            assertTrue(answerSent.await(5, TimeUnit.SECONDS));
+        } finally {
+            worker.stop();
+        }
+        ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
+        verify(redis, times(2)).convertAndSend(eq("ai-chat-updates"), messages.capture());
+        List<String> sent = messages.getAllValues();
+        assertTrue(sent.get(1).startsWith("job||message||"));
+        var answer = new ObjectMapper().readTree(sent.get(1).split("\\|\\|", 3)[2]);
+        assertEquals("See [Resume.pdf](resume:doc)", answer.get("text").asText());
+        var source = answer.get("sources").get(0);
+        assertEquals("doc", source.get("documentId").asText());
+        assertEquals("https://example.test/resume.pdf", source.get("fileUrl").asText());
+    }
 
     @Test
     @SuppressWarnings("unchecked")

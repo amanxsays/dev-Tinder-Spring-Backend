@@ -13,6 +13,7 @@ public class DocumentChunk {
     private String candidateId;
     private String documentId;
     private String fileName;
+    private String fileUrl;
     private int chunkIndex;
 
     @TextIndexed(weight = 2)

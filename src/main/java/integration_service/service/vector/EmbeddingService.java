@@ -1,9 +1,7 @@
 package integration_service.service.vector;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
+import integration_service.service.gemini.GeminiClient;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
 
 import java.util.List;
 import java.util.Map;
@@ -11,15 +9,10 @@ import java.util.Map;
 @Service
 public class EmbeddingService {
 
-    private final RestClient restClient;
+    private final GeminiClient gemini;
 
-    @Value("${google.gemini.api-key}")
-    private String apiKey;
-
-    public EmbeddingService() {
-        this.restClient = RestClient.builder()
-                .baseUrl("https://generativelanguage.googleapis.com")
-                .build();
+    public EmbeddingService(GeminiClient gemini) {
+        this.gemini = gemini;
     }
 
     @SuppressWarnings("unchecked")
@@ -32,12 +25,7 @@ public class EmbeddingService {
                 "outputDimensionality", 768
         );
 
-        Map<String, Object> response = restClient.post()
-                .uri("/v1beta/models/gemini-embedding-001:embedContent?key=" + apiKey)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(Map.class);
+        Map<String, Object> response = gemini.embedContent(body);
 
         if (response != null && response.containsKey("embedding")) {
             Map<String, Object> embeddingMap = (Map<String, Object>) response.get("embedding");

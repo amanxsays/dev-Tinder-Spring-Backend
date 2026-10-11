@@ -53,6 +53,7 @@ public class PineconeDenseSearchService {
                 chunk.setCandidateId(getMetaString(metadata, "candidateId"));
                 chunk.setDocumentId(getMetaString(metadata, "documentId"));
                 chunk.setFileName(getMetaString(metadata, "fileName"));
+                chunk.setFileUrl(getMetaString(metadata, "fileUrl"));
                 chunk.setChunkIndex((int) getMetaNumber(metadata, "chunkIndex"));
                 chunk.setText(getMetaString(metadata, "text"));
 

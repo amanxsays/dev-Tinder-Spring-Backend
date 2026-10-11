@@ -1,12 +1,11 @@
 package integration_service.service.retrieval;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import integration_service.model.DocumentChunk;
+import integration_service.service.gemini.GeminiClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -18,11 +17,7 @@ import java.util.stream.Collectors;
 public class AdaptiveLoopService {
 
     private final HybridRetrievalService hybridRetrievalService;
-    private final RestClient restClient;
-    private final ObjectMapper objectMapper;
-
-    @Value("${google.gemini.api-key}")
-    private String apiKey;
+    private final GeminiClient gemini;
 
     @Value("classpath:prompts/evaluator-prompt.txt")
     private Resource evaluatorPromptResource;
@@ -32,12 +27,9 @@ public class AdaptiveLoopService {
 
     private static final int MAX_ITERATIONS = 3;
 
-    public AdaptiveLoopService(HybridRetrievalService hybridRetrievalService) {
+    public AdaptiveLoopService(HybridRetrievalService hybridRetrievalService, GeminiClient gemini) {
         this.hybridRetrievalService = hybridRetrievalService;
-        this.objectMapper = new ObjectMapper();
-        this.restClient = RestClient.builder()
-                .baseUrl("https://generativelanguage.googleapis.com")
-                .build();
+        this.gemini = gemini;
     }
 
     public List<DocumentChunk> executeAdaptiveSearch(String originalQuery) {
@@ -79,8 +71,14 @@ public class AdaptiveLoopService {
             String fullPrompt = String.format(template, originalQuery, contextText);
             String responseText = callGemini(fullPrompt);
             return responseText.trim().equalsIgnoreCase("YES");
+        } catch (AnswerGenerationException e) {
+            throw e;
+        } catch (RestClientResponseException e) {
+            System.err.println("Evaluator failed: Gemini HTTP " + e.getStatusCode().value());
+            if (e.getStatusCode().value() == 429) throw AnswerGenerationException.fromProviderResponse(e);
+            return true;
         } catch (Exception e) {
-            System.err.println("Evaluator failed: " + e.getMessage());
+            System.err.println("Evaluator failed: " + e.getClass().getSimpleName());
             return true;
         }
     }
@@ -90,8 +88,14 @@ public class AdaptiveLoopService {
             String template = rewriterPromptResource.getContentAsString(StandardCharsets.UTF_8);
             String fullPrompt = String.format(template, originalQuery, contextText);
             return callGemini(fullPrompt).trim();
+        } catch (AnswerGenerationException e) {
+            throw e;
+        } catch (RestClientResponseException e) {
+            System.err.println("Rewriter failed: Gemini HTTP " + e.getStatusCode().value());
+            if (e.getStatusCode().value() == 429) throw AnswerGenerationException.fromProviderResponse(e);
+            return originalQuery;
         } catch (Exception e) {
-            System.err.println("Rewriter failed: " + e.getMessage());
+            System.err.println("Rewriter failed: " + e.getClass().getSimpleName());
             return originalQuery;
         }
     }
@@ -102,12 +106,7 @@ public class AdaptiveLoopService {
                 "generationConfig", Map.of("temperature", 0.0)
         );
 
-        Map response = restClient.post()
-                .uri("/v1beta/models/gemini-3.6-flash:generateContent?key=" + apiKey)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(requestBody)
-                .retrieve()
-                .body(Map.class);
+        Map response = gemini.generateContent(requestBody);
 
         return extractTextFromResponse(response);
     }

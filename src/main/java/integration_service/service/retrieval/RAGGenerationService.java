@@ -1,11 +1,11 @@
 package integration_service.service.retrieval;
 
 import integration_service.model.DocumentChunk;
+import integration_service.service.gemini.GeminiClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -15,18 +15,13 @@ import java.util.stream.Collectors;
 @Service
 public class RAGGenerationService {
 
-    private final RestClient restClient;
-
-    @Value("${google.gemini.api-key}")
-    private String apiKey;
+    private final GeminiClient gemini;
 
     @Value("classpath:prompts/generation-prompt.txt")
     private Resource generationPromptResource;
 
-    public RAGGenerationService() {
-        this.restClient = RestClient.builder()
-                .baseUrl("https://generativelanguage.googleapis.com")
-                .build();
+    public RAGGenerationService(GeminiClient gemini) {
+        this.gemini = gemini;
     }
 
     public String generateAnswer(String userQuery, List<DocumentChunk> retrievedChunks) {
@@ -36,7 +31,7 @@ public class RAGGenerationService {
 
         try {
             String contextText = retrievedChunks.stream()
-                    .map(chunk -> "Source [" + chunk.getFileName() + "]:\n" + chunk.getText())
+                    .map(chunk -> "Source [" + chunk.getFileName() + "] (resume:" + chunk.getDocumentId() + "):\n" + chunk.getText())
                     .collect(Collectors.joining("\n\n"));
 
             String template = generationPromptResource.getContentAsString(StandardCharsets.UTF_8);
@@ -47,18 +42,20 @@ public class RAGGenerationService {
                     "generationConfig", Map.of("temperature", 0.3)
             );
 
-            Map response = restClient.post()
-                    .uri("/v1beta/models/gemini-3.6-flash:generateContent?key=" + apiKey)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(Map.class);
+            Map response = gemini.generateContent(requestBody);
 
             return extractTextFromResponse(response);
 
+        } catch (AnswerGenerationException e) {
+            throw e;
+        } catch (RestClientResponseException e) {
+            int status = e.getStatusCode().value();
+            System.err.println("Final generation failed: Gemini HTTP " + status);
+            throw AnswerGenerationException.fromProviderResponse(e);
         } catch (Exception e) {
-            System.err.println("Final generation failed: " + e.getMessage());
-            return "I encountered an error while trying to generate an answer. Please try again.";
+            System.err.println("Final generation failed: " + e.getClass().getSimpleName());
+            throw new AnswerGenerationException(
+                    "I couldn't generate an answer. Please try again.", e);
         }
     }
 
@@ -68,7 +65,11 @@ public class RAGGenerationService {
             List<Map<String, Object>> candidates = (List<Map<String, Object>>) response.get("candidates");
             Map<String, Object> content = (Map<String, Object>) candidates.getFirst().get("content");
             List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
-            return (String) parts.getFirst().get("text");
+            String text = parts.stream().map(part -> part.get("text"))
+                    .filter(String.class::isInstance).map(String.class::cast)
+                    .collect(Collectors.joining("\n")).trim();
+            if (text.isEmpty()) throw new IllegalStateException("Gemini returned no answer text");
+            return text;
         } catch (Exception e) {
             throw new RuntimeException("Failed to extract final text from Gemini");
         }

@@ -4,11 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import integration_service.model.UserMemory;
 import integration_service.repository.UserMemoryRepository;
+import integration_service.service.gemini.GeminiClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -19,21 +18,16 @@ import java.util.Map;
 public class MemoryEngineService {
 
     private final UserMemoryRepository memoryRepository;
-    private final RestClient restClient;
+    private final GeminiClient gemini;
     private final ObjectMapper objectMapper;
-
-    @Value("${google.gemini.api-key}")
-    private String apiKey;
 
     @Value("classpath:prompts/memory-extraction-prompt.txt")
     private Resource extractionPromptResource;
 
-    public MemoryEngineService(UserMemoryRepository memoryRepository) {
+    public MemoryEngineService(UserMemoryRepository memoryRepository, GeminiClient gemini) {
         this.memoryRepository = memoryRepository;
         this.objectMapper = new ObjectMapper();
-        this.restClient = RestClient.builder()
-                .baseUrl("https://generativelanguage.googleapis.com")
-                .build();
+        this.gemini = gemini;
     }
 
     public void extractAndSaveMemories(String userId, String userQuery) {
@@ -50,12 +44,7 @@ public class MemoryEngineService {
                     "generationConfig", Map.of("temperature", 0.0)
             );
 
-            Map response = restClient.post()
-                    .uri("/v1beta/models/gemini-3.6-flash:generateContent?key=" + apiKey)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(Map.class);
+            Map response = gemini.generateContent(requestBody);
 
             String rawJson = extractTextFromResponse(response);
 
@@ -67,7 +56,7 @@ public class MemoryEngineService {
             }
 
         } catch (Exception e) {
-            System.err.println("Failed to extract memories: " + e.getMessage());
+            System.err.println("Failed to extract memories: " + e.getClass().getSimpleName());
         }
     }
 

@@ -16,7 +16,7 @@ public class DocumentMetadataService {
         this.repository = repository;
     }
 
-    public void saveChunks(String candidateId, String documentId, String fileName, List<String> chunks) {
+    public void saveChunks(String candidateId, String documentId, String fileName, String fileUrl, List<String> chunks) {
         List<DocumentChunk> documentChunks = new ArrayList<>();
 
         for (int i = 0; i < chunks.size(); i++) {
@@ -25,6 +25,7 @@ public class DocumentMetadataService {
             chunk.setCandidateId(candidateId);
             chunk.setDocumentId(documentId);
             chunk.setFileName(fileName);
+            chunk.setFileUrl(fileUrl);
             chunk.setChunkIndex(i);
             chunk.setText(chunks.get(i));
 

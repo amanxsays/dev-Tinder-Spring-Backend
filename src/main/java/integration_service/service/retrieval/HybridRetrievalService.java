@@ -12,15 +12,17 @@ public class HybridRetrievalService {
     private final PineconeDenseSearchService denseSearchService;
     private final MongoSparseSearchService sparseSearchService;
     private final ReciprocalRankFusionService rrfService;
+    private final ActiveResumeService activeResumes;
 
     private static final int TOP_K_PER_ENGINE = 15;
 
     public HybridRetrievalService(PineconeDenseSearchService denseSearchService,
                                   MongoSparseSearchService sparseSearchService,
-                                  ReciprocalRankFusionService rrfService) {
+                                  ReciprocalRankFusionService rrfService, ActiveResumeService activeResumes) {
         this.denseSearchService = denseSearchService;
         this.sparseSearchService = sparseSearchService;
         this.rrfService = rrfService;
+        this.activeResumes = activeResumes;
     }
 
     public List<DocumentChunk> retrieveCandidates(String queryText) {
@@ -41,6 +43,6 @@ public class HybridRetrievalService {
         List<DocumentChunk> denseResults = denseFuture.join();
         List<DocumentChunk> sparseResults = sparseFuture.join();
 
-        return rrfService.fuseAndFilter(denseResults, sparseResults);
+        return activeResumes.filterCurrent(rrfService.fuseAndFilter(denseResults, sparseResults));
     }
 }

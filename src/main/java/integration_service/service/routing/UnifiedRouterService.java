@@ -5,11 +5,12 @@ import integration_service.model.routing.ExecutionPlan;
 import integration_service.model.routing.ExecutionTier;
 import integration_service.model.routing.RetrievalMode;
 import integration_service.model.routing.Strategy;
+import integration_service.service.gemini.GeminiClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
+import integration_service.service.retrieval.AnswerGenerationException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -18,20 +19,15 @@ import java.util.Map;
 @Service
 public class UnifiedRouterService {
 
-    private final RestClient restClient;
+    private final GeminiClient gemini;
     private final ObjectMapper objectMapper;
-
-    @Value("${google.gemini.api-key}")
-    private String apiKey;
 
     @Value("classpath:prompts/router-prompt.txt")
     private Resource routerPromptResource;
 
-    public UnifiedRouterService() {
+    public UnifiedRouterService(GeminiClient gemini) {
         this.objectMapper = new ObjectMapper();
-        this.restClient = RestClient.builder()
-                .baseUrl("https://generativelanguage.googleapis.com")
-                .build();
+        this.gemini = gemini;
     }
 
     public ExecutionPlan planExecution(String userQuery) {
@@ -54,25 +50,30 @@ public class UnifiedRouterService {
                     )
             );
 
-            Map<String, Object> response = restClient.post()
-                    .uri("/v1beta/models/gemini-3.6-flash:generateContent?key=" + apiKey)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(Map.class);
+            Map<String, Object> response = gemini.generateContent(requestBody);
 
             String jsonText = extractResponseText(response);
             return objectMapper.readValue(jsonText, ExecutionPlan.class);
 
+        } catch (AnswerGenerationException e) {
+            throw e;
+        } catch (RestClientResponseException e) {
+            System.err.println("Routing failed: Gemini HTTP " + e.getStatusCode().value());
+            if (e.getStatusCode().value() == 429) throw AnswerGenerationException.fromProviderResponse(e);
+            return fallback(userQuery);
         } catch (Exception e) {
-            System.err.println("Routing failed: " + e.getMessage());
-            return new ExecutionPlan(
+            System.err.println("Routing failed: " + e.getClass().getSimpleName());
+            return fallback(userQuery);
+        }
+    }
+
+    private ExecutionPlan fallback(String userQuery) {
+        return new ExecutionPlan(
                     Strategy.SINGLE_SOURCE,
                     ExecutionTier.DIRECT,
                     RetrievalMode.RANKED_RETRIEVAL,
                     List.of(userQuery)
             );
-        }
     }
 
     @SuppressWarnings("unchecked")

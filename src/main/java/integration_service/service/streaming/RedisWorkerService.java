@@ -1,7 +1,10 @@
 package integration_service.service.streaming;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import integration_service.model.ChatAnswer;
 import integration_service.service.routing.AgenticOrchestratorService;
 import integration_service.service.memory.MemoryEngineService;
+import integration_service.service.retrieval.AnswerGenerationException;
 import jakarta.annotation.PreDestroy;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Lazy;
@@ -10,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -23,6 +27,7 @@ public class RedisWorkerService implements SmartLifecycle {
 
     private ExecutorService workerPool;
     private volatile boolean running;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public RedisWorkerService(StringRedisTemplate redisTemplate,
                               AgenticOrchestratorService orchestratorService,
@@ -102,10 +107,11 @@ public class RedisWorkerService implements SmartLifecycle {
             publish(jobId, "status", "Processing intent and building execution plan...");
 
             System.out.println("Orchestrator is processing the query...");
-            String finalAnswer = orchestratorService.processUserQuery(query, userId);
+            ChatAnswer finalAnswer = orchestratorService.processUserQuery(query, userId);
 
             System.out.println("Publishing final answer to frontend...");
-            publish(jobId, "message", finalAnswer);
+            // Keep citations and answer together: Pub/Sub callbacks can run concurrently.
+            publish(jobId, "message", objectMapper.writeValueAsString(finalAnswer));
 
             System.out.println("Extracting memories in background...");
             memoryEngineService.extractAndSaveMemories(userId, query);
@@ -113,8 +119,11 @@ public class RedisWorkerService implements SmartLifecycle {
             System.out.println("--- Job Complete ---");
 
         } catch (Exception e) {
-            System.err.println("Worker Error: " + e.getMessage());
-            publish(jobId, "error", "Agentic generation failed: " + e.getMessage());
+            Throwable failure = e;
+            while (failure instanceof CompletionException && failure.getCause() != null) failure = failure.getCause();
+            System.err.println("Worker Error: " + failure.getClass().getSimpleName());
+            publish(jobId, "error", failure instanceof AnswerGenerationException
+                    ? failure.getMessage() : "I couldn't complete this request. Please try again.");
         }
     }
 
