@@ -2,7 +2,8 @@ package integration_service.service.streaming;
 
 import integration_service.service.routing.AgenticOrchestratorService;
 import integration_service.service.memory.MemoryEngineService;
-import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -10,16 +11,18 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @Lazy(false)
-public class RedisWorkerService {
+public class RedisWorkerService implements SmartLifecycle {
 
     private final StringRedisTemplate redisTemplate;
     private final AgenticOrchestratorService orchestratorService;
     private final MemoryEngineService memoryEngineService; // <-- ADD THIS
 
-    private final ExecutorService workerPool = Executors.newFixedThreadPool(3);
+    private ExecutorService workerPool;
+    private volatile boolean running;
 
     public RedisWorkerService(StringRedisTemplate redisTemplate,
                               AgenticOrchestratorService orchestratorService,
@@ -29,20 +32,56 @@ public class RedisWorkerService {
         this.memoryEngineService = memoryEngineService;
     }
 
-    @PostConstruct
-    public void startListening() {
+    @Override
+    public synchronized void start() {
+        if (running) {
+            return;
+        }
+        workerPool = Executors.newFixedThreadPool(3);
+        running = true;
         workerPool.execute(() -> {
-            while (true) {
+            while (running && !Thread.currentThread().isInterrupted()) {
                 try {
                     String jobPayload = redisTemplate.opsForList().leftPop("ai-job-queue", Duration.ofSeconds(60));
-                    if (jobPayload != null) {
+                    if (running && jobPayload != null) {
                         workerPool.submit(() -> processJob(jobPayload));
                     }
                 } catch (Exception e) {
+                    if (!running || Thread.currentThread().isInterrupted()) {
+                        break;
+                    }
                     System.err.println("Worker Polling Error: " + e.getMessage());
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
         });
+    }
+
+    @Override
+    @PreDestroy
+    public synchronized void stop() {
+        running = false;
+        if (workerPool == null) {
+            return;
+        }
+        workerPool.shutdownNow();
+        try {
+            if (!workerPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                System.err.println("Redis workers did not finish within the shutdown timeout");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 
     private void processJob(String jobPayload) {
@@ -80,6 +119,9 @@ public class RedisWorkerService {
     }
 
     private void publish(String jobId, String eventName, String payload) {
+        if (!running) {
+            return;
+        }
         String message = jobId + "||" + eventName + "||" + payload;
         redisTemplate.convertAndSend("ai-chat-updates", message);
     }
