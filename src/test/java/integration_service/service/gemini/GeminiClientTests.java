@@ -100,6 +100,39 @@ class GeminiClientTests {
     }
 
     @Test
+    void unavailableResponseRetriesSameKeyWithBackoffThenRecovers() {
+        var delays = new java.util.ArrayList<Long>();
+        var builder = RestClient.builder().baseUrl("https://generativelanguage.googleapis.com");
+        server = MockRestServiceServer.bindTo(builder).build();
+        client = new GeminiClient(builder.build(), pool, "gemini-3.6-flash", delays::add);
+        for (int i = 0; i < 2; i++) {
+            server.expect(anything()).andExpect(header("x-goog-api-key", "key1"))
+                    .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        }
+        success("key1", "generateContent");
+        assertEquals("ok", client.generateContent(Map.of()).get("result"));
+        assertEquals(2, delays.size());
+        assertTrue(delays.get(0) >= 1000 && delays.get(0) < 1200);
+        assertTrue(delays.get(1) >= 2000 && delays.get(1) < 2200);
+        server.verify();
+    }
+
+    @Test
+    void persistentUnavailableFailureStopsAfterTwoRetries() {
+        var builder = RestClient.builder().baseUrl("https://generativelanguage.googleapis.com");
+        server = MockRestServiceServer.bindTo(builder).build();
+        client = new GeminiClient(builder.build(), pool, "gemini-3.6-flash", ignored -> {});
+        for (int i = 0; i < 3; i++) {
+            server.expect(anything()).andExpect(header("x-goog-api-key", "key1"))
+                    .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        }
+        var failure = assertThrows(RestClientResponseException.class, () -> client.generateContent(Map.of()));
+        assertEquals(503, failure.getStatusCode().value());
+        assertTrue(AnswerGenerationException.fromProviderResponse(failure).getMessage().contains("busy"));
+        server.verify();
+    }
+
+    @Test
     void legacyKeyAndDuplicateKeyConfigurationRemainSupported() {
         var legacy = new GeminiKeyPool(" , ", "old-key", clock);
         assertEquals("old-key", legacy.key(legacy.select("model", Set.of())));

@@ -19,10 +19,10 @@ public class RedisConfig {
 
     @Bean
     public RedisMessageListenerContainer container(RedisConnectionFactory connectionFactory,
-                                                   MessageListenerAdapter listenerAdapter) {
+                                                   MessageListenerAdapter listenerAdapter, AiQueueNames names) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
-        container.addMessageListener(listenerAdapter, new PatternTopic("ai-chat-updates"));
+        container.addMessageListener(listenerAdapter, new PatternTopic(names.channel()));
         return container;
     }
 

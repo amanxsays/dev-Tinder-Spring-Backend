@@ -71,12 +71,21 @@ flowchart TB
 
 ## Agentic chat pipeline (the interesting part)
 
+Standalone greetings (`hi`, `hii`, `hiii`, `hello`, `heyyy`) and basic bot
+questions return a terminal SSE answer directly from the controller. They bypass
+Redis, Mongo memory lookup, retrieval, Gemini, and memory extraction. The worker
+also skips memory extraction for older queued fast-intent requests. Classification
+uses the original message before memory is appended. A mixed request such as
+"Hi, find React developers" follows the normal search pipeline.
+
 All Gemini operations use the shared client in `service/gemini/`. It rotates
 successful requests across the configured keys. HTTP 429 puts that key and model
 on cooldown and tries the next available key, at most once per key per request.
 Daily quota cooldowns last until the provider retry time or the next Pacific
 midnight, whichever is later. Authentication failures (401/403) skip the rejected
-key until restart. Other failures are not automatically repeated across keys.
+key until restart. HTTP 503 receives at most two retries per operation, on the
+same key, with roughly one- and two-second backoffs plus jitter. Persistent 503
+failures show a service-busy message. Other failures are not automatically repeated across keys.
 Generation and embedding cooldowns are separate, and concurrent requests share
 the same thread-safe pool. Cooldowns are in memory and reset on service restart.
 
@@ -84,6 +93,13 @@ When no keys remain available, the chat pipeline stops with a clear SSE error,
 no resume citations, and no memory-extraction call. Failed output is never
 presented as a sourced answer. Quotas belong to Google Cloud projects; adding
 more keys from the same project does not increase that project's allowance.
+
+When localhost and Render share Redis, set `AI_REDIS_NAMESPACE=devtinder-local`
+in the local `.env`. This isolates both the job queue and the SSE update channel.
+Leave the variable unset on existing Render deployments to preserve their queue
+names. Never run local workers against a production queue. The worker polls for
+five seconds with a fifteen-second Redis command timeout, avoiding idle blocking
+polls timing out at the client deadline.
 
 Chat requests are decoupled from the HTTP thread: the controller enqueues a job and returns an `SseEmitter`; a worker pool processes it and publishes results back over Redis Pub/Sub.
 

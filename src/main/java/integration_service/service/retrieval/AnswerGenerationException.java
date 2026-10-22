@@ -11,6 +11,9 @@ public class AnswerGenerationException extends RuntimeException {
 
     public static AnswerGenerationException fromProviderResponse(RestClientResponseException error) {
         String message = "AI chat is currently unavailable. Please try again later.";
+        if (error.getStatusCode().value() == 503) {
+            message = "The AI service is busy right now. Please try again shortly.";
+        }
         if (error.getStatusCode().value() == 429) {
             message = "The AI request limit has been reached. Please try again later.";
             try {

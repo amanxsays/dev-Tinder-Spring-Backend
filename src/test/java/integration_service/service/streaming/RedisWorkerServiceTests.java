@@ -3,6 +3,7 @@ package integration_service.service.streaming;
 import integration_service.service.memory.MemoryEngineService;
 import integration_service.service.routing.AgenticOrchestratorService;
 import integration_service.model.ChatAnswer;
+import integration_service.config.AiQueueNames;
 import integration_service.model.ResumeSource;
 import integration_service.service.retrieval.AnswerGenerationException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RedisWorkerServiceTests {
+    private final AiQueueNames names = new AiQueueNames("test-local");
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -34,7 +36,7 @@ class RedisWorkerServiceTests {
         ListOperations<String, String> queue = mock(ListOperations.class);
         when(redis.opsForList()).thenReturn(queue);
         AtomicBoolean delivered = new AtomicBoolean();
-        when(queue.leftPop("ai-job-queue", Duration.ofSeconds(60))).thenAnswer(invocation -> {
+        when(queue.leftPop(names.queue(), Duration.ofSeconds(5))).thenAnswer(invocation -> {
             if (!delivered.getAndSet(true)) return "job||user||Fixture query";
             try { new CountDownLatch(1).await(); }
             catch (InterruptedException e) { Thread.currentThread().interrupt(); }
@@ -46,15 +48,15 @@ class RedisWorkerServiceTests {
                 .thenThrow(asynchronous ? new CompletionException(failure) : failure);
         MemoryEngineService memory = mock(MemoryEngineService.class);
         CountDownLatch errorSent = new CountDownLatch(1);
-        when(redis.convertAndSend(eq("ai-chat-updates"), anyString())).thenAnswer(invocation -> {
+        when(redis.convertAndSend(eq(names.channel()), anyString())).thenAnswer(invocation -> {
             if (((String) invocation.getArgument(1)).startsWith("job||error||")) errorSent.countDown();
             return 1L;
         });
-        var worker = new RedisWorkerService(redis, orchestrator, memory);
+        var worker = new RedisWorkerService(redis, orchestrator, memory, names);
         try { worker.start(); assertTrue(errorSent.await(5, TimeUnit.SECONDS)); }
         finally { worker.stop(); }
-        verify(redis).convertAndSend("ai-chat-updates", "job||error||Daily limit reached");
-        verify(redis, never()).convertAndSend(eq("ai-chat-updates"), startsWith("job||message||"));
+        verify(redis).convertAndSend(names.channel(), "job||error||Daily limit reached");
+        verify(redis, never()).convertAndSend(eq(names.channel()), startsWith("job||message||"));
         verifyNoInteractions(memory);
     }
 
@@ -65,7 +67,7 @@ class RedisWorkerServiceTests {
         ListOperations<String, String> queue = mock(ListOperations.class);
         when(redis.opsForList()).thenReturn(queue);
         AtomicBoolean delivered = new AtomicBoolean();
-        when(queue.leftPop("ai-job-queue", Duration.ofSeconds(60))).thenAnswer(invocation -> {
+        when(queue.leftPop(names.queue(), Duration.ofSeconds(5))).thenAnswer(invocation -> {
             if (!delivered.getAndSet(true)) return "job||user||Find developers";
             try {
                 new CountDownLatch(1).await();
@@ -75,7 +77,7 @@ class RedisWorkerServiceTests {
             return null;
         });
         CountDownLatch answerSent = new CountDownLatch(1);
-        when(redis.convertAndSend(eq("ai-chat-updates"), anyString())).thenAnswer(invocation -> {
+        when(redis.convertAndSend(eq(names.channel()), anyString())).thenAnswer(invocation -> {
             if (((String) invocation.getArgument(1)).startsWith("job||message||")) answerSent.countDown();
             return 1L;
         });
@@ -83,7 +85,7 @@ class RedisWorkerServiceTests {
         when(orchestrator.processUserQuery("Find developers", "user"))
                 .thenReturn(new ChatAnswer("See [Resume.pdf](resume:doc)",
                         List.of(new ResumeSource("doc", "candidate", "Resume.pdf", "https://example.test/resume.pdf"))));
-        RedisWorkerService worker = new RedisWorkerService(redis, orchestrator, mock(MemoryEngineService.class));
+        RedisWorkerService worker = new RedisWorkerService(redis, orchestrator, mock(MemoryEngineService.class), names);
         try {
             worker.start();
             assertTrue(answerSent.await(5, TimeUnit.SECONDS));
@@ -91,7 +93,7 @@ class RedisWorkerServiceTests {
             worker.stop();
         }
         ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
-        verify(redis, times(2)).convertAndSend(eq("ai-chat-updates"), messages.capture());
+        verify(redis, times(2)).convertAndSend(eq(names.channel()), messages.capture());
         List<String> sent = messages.getAllValues();
         assertTrue(sent.get(1).startsWith("job||message||"));
         var answer = new ObjectMapper().readTree(sent.get(1).split("\\|\\|", 3)[2]);
@@ -109,7 +111,7 @@ class RedisWorkerServiceTests {
         when(redis.opsForList()).thenReturn(queue);
         CountDownLatch polling = new CountDownLatch(1);
         CountDownLatch interrupted = new CountDownLatch(1);
-        when(queue.leftPop("ai-job-queue", Duration.ofSeconds(60))).thenAnswer(invocation -> {
+        when(queue.leftPop(names.queue(), Duration.ofSeconds(5))).thenAnswer(invocation -> {
             polling.countDown();
             try {
                 new CountDownLatch(1).await();
@@ -122,7 +124,7 @@ class RedisWorkerServiceTests {
         });
 
         RedisWorkerService worker = new RedisWorkerService(redis,
-                mock(AgenticOrchestratorService.class), mock(MemoryEngineService.class));
+                mock(AgenticOrchestratorService.class), mock(MemoryEngineService.class), names);
         assertFalse(worker.isRunning());
         verifyNoInteractions(redis);
 
@@ -135,7 +137,7 @@ class RedisWorkerServiceTests {
 
         assertFalse(worker.isRunning());
         assertEquals(0, interrupted.getCount());
-        verify(queue, times(1)).leftPop("ai-job-queue", Duration.ofSeconds(60));
+        verify(queue, times(1)).leftPop(names.queue(), Duration.ofSeconds(5));
         worker.stop(); // Repeated destruction is safe.
     }
 }

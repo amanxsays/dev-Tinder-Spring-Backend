@@ -2,6 +2,7 @@ package integration_service.service.streaming;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import integration_service.model.ChatAnswer;
+import integration_service.config.AiQueueNames;
 import integration_service.service.routing.AgenticOrchestratorService;
 import integration_service.service.memory.MemoryEngineService;
 import integration_service.service.retrieval.AnswerGenerationException;
@@ -22,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 public class RedisWorkerService implements SmartLifecycle {
 
     private final StringRedisTemplate redisTemplate;
+    private final AiQueueNames names;
     private final AgenticOrchestratorService orchestratorService;
     private final MemoryEngineService memoryEngineService; // <-- ADD THIS
 
@@ -31,10 +33,11 @@ public class RedisWorkerService implements SmartLifecycle {
 
     public RedisWorkerService(StringRedisTemplate redisTemplate,
                               AgenticOrchestratorService orchestratorService,
-                              MemoryEngineService memoryEngineService) {
+                              MemoryEngineService memoryEngineService, AiQueueNames names) {
         this.redisTemplate = redisTemplate;
         this.orchestratorService = orchestratorService;
         this.memoryEngineService = memoryEngineService;
+        this.names = names;
     }
 
     @Override
@@ -47,7 +50,7 @@ public class RedisWorkerService implements SmartLifecycle {
         workerPool.execute(() -> {
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
-                    String jobPayload = redisTemplate.opsForList().leftPop("ai-job-queue", Duration.ofSeconds(60));
+                    String jobPayload = redisTemplate.opsForList().leftPop(names.queue(), Duration.ofSeconds(5));
                     if (running && jobPayload != null) {
                         workerPool.submit(() -> processJob(jobPayload));
                     }
@@ -113,8 +116,10 @@ public class RedisWorkerService implements SmartLifecycle {
             // Keep citations and answer together: Pub/Sub callbacks can run concurrently.
             publish(jobId, "message", objectMapper.writeValueAsString(finalAnswer));
 
-            System.out.println("Extracting memories in background...");
-            memoryEngineService.extractAndSaveMemories(userId, query);
+            if (orchestratorService.answerWithoutSearch(query).isEmpty()) {
+                System.out.println("Extracting memories in background...");
+                memoryEngineService.extractAndSaveMemories(userId, query);
+            }
 
             System.out.println("--- Job Complete ---");
 
@@ -132,6 +137,6 @@ public class RedisWorkerService implements SmartLifecycle {
             return;
         }
         String message = jobId + "||" + eventName + "||" + payload;
-        redisTemplate.convertAndSend("ai-chat-updates", message);
+        redisTemplate.convertAndSend(names.channel(), message);
     }
 }
