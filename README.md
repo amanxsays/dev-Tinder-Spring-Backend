@@ -4,6 +4,13 @@ Java 25 / Spring Boot 4 microservice that powers three things for DevTinder: **d
 
 ## Tech stack
 
+**Android/web gateway update:** AI clients now authenticate with the Node backend's
+`POST /ai/chat/stream`. Node signs its upstream request to this service. Configure
+the same `AI_GATEWAY_SECRET` (at least 32 bytes) in both services; chat fails closed
+without it. `AI_GATEWAY_REQUIRED` defaults to `true`. The public health ping is
+unchanged. See [authenticated gateway setup and coordinated rollout](docs/ANDROID-GATEWAY.md)
+before deploying these changes. No production settings were changed locally.
+
 | Concern | Choice |
 |---|---|
 | Framework | Spring Boot 4 (Web MVC), Java 25 |
@@ -50,7 +57,9 @@ flowchart TB
 
     Node -- "resume uploaded" --> IngestC
     Node -- "profile view" --> StatsC
-    FE -- "AI chat (SSE)" --> ChatC
+    FE -- "authenticated AI chat (SSE)" --> Node
+    Node -- "signed AI gateway" --> ChatC
+    FE -- "public readiness ping" --> Health
 
     StatsC --> GH
     StatsC -- "writes integrations.*" --> Mongo
@@ -106,6 +115,7 @@ Chat requests are decoupled from the HTTP thread: the controller enqueues a job 
 ```mermaid
 sequenceDiagram
     participant FE as Frontend
+    participant Node as Authenticated Node gateway
     participant Chat as ChatController
     participant Q as Redis list (ai-job-queue)
     participant W as RedisWorkerService
@@ -115,7 +125,8 @@ sequenceDiagram
     participant PS as Redis Pub/Sub
     participant Sse as SseEmitterManager
 
-    FE->>Chat: POST /api/chat/stream {query, userId}
+    FE->>Node: POST /ai/chat/stream {query}
+    Node->>Chat: POST /api/chat/stream with signed canonical identity
     Chat->>Sse: register SseEmitter(jobId)
     Chat->>Q: LPUSH job
     Chat-->>FE: SSE connection open
