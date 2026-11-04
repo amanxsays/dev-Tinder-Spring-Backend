@@ -195,7 +195,7 @@ flowchart LR
 
 | Method | Route | Caller | Description |
 |---|---|---|---|
-| GET | `/api/ping` | — | Liveness check |
+| GET | `/api/ping` | Frontend / health clients | Public HTTP liveness check; cross-origin reads allowed without credentials |
 | GET | `/api/stats?github=&codeforces=&leetcode=&userId=` | Node backend | Aggregates dev-platform stats; writes back to `users.integrations` in Mongo |
 | POST | `/api/ingestion/process` | Node backend | `{fileUrl, candidateId, fileName, documentId}` — parses and embeds the current resume version |
 | POST | `/api/ingestion/cleanup` | Node backend | `{candidateId}` — deletes only retired resume vectors and chunks; no AI calls |
