@@ -133,6 +133,45 @@ class GeminiClientTests {
     }
 
     @Test
+    void persistentCapacityFailureUsesAlternativeModelOnce() {
+        var builder = RestClient.builder().baseUrl("https://generativelanguage.googleapis.com");
+        server = MockRestServiceServer.bindTo(builder).build();
+        client = new GeminiClient(builder.build(), pool, "gemini-3.6-flash", ignored -> {}, "gemini-2.5-flash");
+        for (int i = 0; i < 3; i++) {
+            server.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"))
+                    .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        }
+        server.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
+                .andRespond(withSuccess("{\"result\":\"fallback answer\"}", MediaType.APPLICATION_JSON));
+        assertEquals("fallback answer", client.generateContent(Map.of()).get("result"));
+        server.verify();
+    }
+
+    @Test
+    void fallbackCapacityFailureDoesNotLoopAcrossModels() {
+        var builder = RestClient.builder().baseUrl("https://generativelanguage.googleapis.com");
+        server = MockRestServiceServer.bindTo(builder).build();
+        client = new GeminiClient(builder.build(), pool, "gemini-3.6-flash", ignored -> {}, "gemini-2.5-flash");
+        for (int i = 0; i < 4; i++) server.expect(anything()).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        assertThrows(RestClientResponseException.class, () -> client.generateContent(Map.of()));
+        server.verify();
+    }
+
+    @Test
+    void fallbackDoesNotBypassQuotaOrRetryInvalidRequests() {
+        for (var status : List.of(HttpStatus.TOO_MANY_REQUESTS, HttpStatus.BAD_REQUEST)) {
+            var builder = RestClient.builder().baseUrl("https://generativelanguage.googleapis.com");
+            server = MockRestServiceServer.bindTo(builder).build();
+            client = new GeminiClient(builder.build(), new GeminiKeyPool("fixture", "", clock),
+                    "gemini-3.6-flash", ignored -> {}, "gemini-2.5-flash");
+            server.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"))
+                    .andRespond(withStatus(status));
+            assertThrows(RuntimeException.class, () -> client.generateContent(Map.of()));
+            server.verify();
+        }
+    }
+
+    @Test
     void legacyKeyAndDuplicateKeyConfigurationRemainSupported() {
         var legacy = new GeminiKeyPool(" , ", "old-key", clock);
         assertEquals("old-key", legacy.key(legacy.select("model", Set.of())));
