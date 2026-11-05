@@ -1,6 +1,7 @@
 package integration_service.controller;
 
 import integration_service.config.AiQueueNames;
+import integration_service.security.AiServiceAssertionVerifier;
 import integration_service.repository.UserMemoryRepository;
 import integration_service.service.retrieval.*;
 import integration_service.service.routing.*;
@@ -28,7 +29,7 @@ class FastChatControllerTests {
         var redis = mock(StringRedisTemplate.class);
         var emitters = mock(SseEmitterManager.class);
         var mvc = MockMvcBuilders.standaloneSetup(new ChatController(emitters, redis,
-                new AiQueueNames("test"), orchestrator)).build();
+                new AiQueueNames("test"), orchestrator, new AiServiceAssertionVerifier("", false))).build();
         var result = mvc.perform(post("/api/chat/stream").contentType("application/json")
                 .content("{\"query\":\"" + query + "\",\"userId\":\"existing-user\"}")).andReturn();
         if (result.getRequest().isAsyncStarted()) result = mvc.perform(asyncDispatch(result)).andReturn();
