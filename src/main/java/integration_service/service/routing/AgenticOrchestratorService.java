@@ -84,7 +84,7 @@ public class AgenticOrchestratorService {
     public Optional<ChatAnswer> answerWithoutSearch(String query) {
         IntentType intent = fastIntentService.classifyIntent(query);
         if (intent == IntentType.GREETING_ACK) {
-            return Optional.of(new ChatAnswer("Hello! I am DevTinder's AI recruiter. How can I help you find candidates today?", List.of()));
+            return Optional.of(new ChatAnswer("Hello! I am Devi, DevTinder's AI recruiter. How can I help you find candidates today?", List.of()));
         }
         if (intent == IntentType.BOT_QA) {
             return Optional.of(new ChatAnswer("I am an Agentic AI assistant. I can search through developer resumes, compare technical skills, and help you find the perfect candidate using vector search.", List.of()));
